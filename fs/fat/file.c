@@ -17,6 +17,9 @@
 #include <linux/security.h>
 #include <linux/falloc.h>
 #include "fat.h"
+#include <linux/slab.h>
+#include <linux/nvme.h>
+#include <linux/nvme_ioctl.h>
 
 static long fat_fallocate(struct file *file, int mode,
 			  loff_t offset, loff_t len);
@@ -207,11 +210,92 @@ int fat_file_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
 	return blkdev_issue_flush(inode->i_sb->s_bdev, GFP_KERNEL, NULL);
 }
 
+void fat_send_vendor_command_to_nvme(struct file *file, uint64_t *data_addr_sec, uint64_t *data_len_bytes)
+{
+	struct block_device *bdev = file->f_inode->i_sb->s_bdev;
+    struct nvme_admin_cmd *vendor_cmd;
+	int ret;
+
+	if (!bdev) {
+		printk(KERN_ERR "Block device is NULL\n");
+		return;
+	}
+
+	if (!file || !file->f_inode) {
+		printk(KERN_ERR "Invalid file or inode\n");
+		return;
+	}
+	
+	vendor_cmd = kmalloc(sizeof(struct nvme_admin_cmd), GFP_KERNEL);
+    if (!vendor_cmd) {
+        printk(KERN_ERR "Failed to allocate memory for vendor command\n");
+        return;
+    }
+
+	memset(vendor_cmd, 0, sizeof(struct nvme_admin_cmd));
+	vendor_cmd->opcode = 0xC2;  // Custom vendor command opcode
+	vendor_cmd->nsid = cpu_to_le32(0);  // Namespace ID 0 for admin commands
+	vendor_cmd->flags = cpu_to_le32(0);  // No flags
+	vendor_cmd->cdw10 = cpu_to_le32(*data_addr_sec & 0xFFFFFFFF);
+	vendor_cmd->cdw11 = cpu_to_le32((*data_addr_sec >> 32) & 0xFFFFFFFF);
+	vendor_cmd->cdw12 = cpu_to_le32(*data_len_bytes & 0xFFFFFFFF);
+	vendor_cmd->cdw13 = cpu_to_le32((*data_len_bytes >> 32) & 0xFFFFFFFF);
+
+	// Use the block device's request queue to submit the command
+	if (bdev->bd_contains)
+		bdev = bdev->bd_contains;
+
+	if (!bdev->bd_disk || !bdev->bd_disk->queue) {
+		printk(KERN_ERR "Invalid block device\n");
+		kfree(vendor_cmd);
+		return;
+	}
+
+	// Check if device major number corresponds to NVMe (259)
+	if (MAJOR(bdev->bd_dev) != 259) {
+		printk(KERN_ERR "Not an NVMe device (major=%d)\n", MAJOR(bdev->bd_dev));
+		kfree(vendor_cmd);
+		return;
+	}
+	ret = __blkdev_driver_ioctl(bdev, 0, NVME_IOCTL_ADMIN_CMD, (unsigned long)vendor_cmd);
+	
+    kfree(vendor_cmd);
+}
+
+void fat_get_info_and_send_to_nvme(struct kiocb *iocb, struct iov_iter *from)
+{
+    struct file *file = iocb->ki_filp;
+    struct inode *inode = file->f_inode;
+	uint64_t data_len = inode->i_size;
+	struct super_block *sb = inode->i_sb;
+	struct block_device *bdev = sb->s_bdev;
+    struct msdos_sb_info *fat_sb = MSDOS_SB(sb);
+    struct msdos_inode_info *fat_inode = MSDOS_I(inode);
+
+	sector_t dbr_sector = bdev->bd_part->start_sect;
+    uint64_t data_start = fat_sb->data_start;
+
+    int i_start = fat_inode->i_start;
+	loff_t addr = dbr_sector + data_start + (i_start - 2) * fat_sb->sec_per_clus;
+	fat_send_vendor_command_to_nvme(file, &addr, &data_len);
+}
+
+ssize_t fat_write_iter(struct kiocb *iocb, struct iov_iter *from)
+{
+    ssize_t ret = 0;
+	struct block_device *bdev = iocb->ki_filp->f_inode->i_sb->s_bdev;
+    ret = generic_file_write_iter(iocb, from);
+	
+	if (MAJOR(bdev->bd_dev) == 259) {
+		fat_get_info_and_send_to_nvme(iocb, from);
+	}
+    return ret;
+}
 
 const struct file_operations fat_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read_iter	= generic_file_read_iter,
-	.write_iter	= generic_file_write_iter,
+	.write_iter	= fat_write_iter,
 	.mmap		= generic_file_mmap,
 	.release	= fat_file_release,
 	.unlocked_ioctl	= fat_generic_ioctl,
@@ -573,3 +657,4 @@ const struct inode_operations fat_file_inode_operations = {
 	.getattr	= fat_getattr,
 	.update_time	= fat_update_time,
 };
+

@@ -8,7 +8,6 @@
 #define _EXT4_EXTENTS
 
 #include "ext4.h"
-
 /*
  * With AGGRESSIVE_TEST defined, the capacity of index/leaf blocks
  * becomes very small, so index split, in-depth growing and

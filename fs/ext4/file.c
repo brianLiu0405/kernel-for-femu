@@ -33,6 +33,12 @@
 #include "ext4_jbd2.h"
 #include "xattr.h"
 #include "acl.h"
+#include <linux/slab.h>
+#include <linux/nvme.h>
+#include <linux/nvme_ioctl.h>
+#include "ext4_extents.h"
+
+uint64_t data_size;
 
 #ifdef CONFIG_FS_DAX
 static ssize_t ext4_dax_read_iter(struct kiocb *iocb, struct iov_iter *to)
@@ -517,10 +523,167 @@ loff_t ext4_llseek(struct file *file, loff_t offset, int whence)
 	return vfs_setpos(file, offset, maxbytes);
 }
 
+void ext4_send_vendor_command_to_nvme(struct file *file, uint64_t *data_addr_sec, uint64_t *data_len_bytes)
+{
+	struct block_device *bdev = file->f_inode->i_sb->s_bdev;
+    struct nvme_admin_cmd *vendor_cmd;
+	int ret;
+
+	if (!bdev) {
+		printk(KERN_ERR "Block device is NULL\n");
+		return;
+	}
+
+	if (!file || !file->f_inode) {
+		printk(KERN_ERR "Invalid file or inode\n");
+		return;
+	}
+	
+	vendor_cmd = kmalloc(sizeof(struct nvme_admin_cmd), GFP_KERNEL);
+    if (!vendor_cmd) {
+        printk(KERN_ERR "Failed to allocate memory for vendor command\n");
+        return;
+    }
+
+	memset(vendor_cmd, 0, sizeof(struct nvme_admin_cmd));
+	vendor_cmd->opcode = 0xC2;  // Custom vendor command opcode
+	vendor_cmd->nsid = cpu_to_le32(0);  // Namespace ID 0 for admin commands
+	vendor_cmd->flags = cpu_to_le32(0);  // No flags
+	vendor_cmd->cdw10 = cpu_to_le32(*data_addr_sec & 0xFFFFFFFF);
+	vendor_cmd->cdw11 = cpu_to_le32((*data_addr_sec >> 32) & 0xFFFFFFFF);
+	vendor_cmd->cdw12 = cpu_to_le32(*data_len_bytes & 0xFFFFFFFF);
+	vendor_cmd->cdw13 = cpu_to_le32((*data_len_bytes >> 32) & 0xFFFFFFFF);
+
+	// Use the block device's request queue to submit the command
+	if (bdev->bd_contains)
+		bdev = bdev->bd_contains;
+
+	if (!bdev->bd_disk || !bdev->bd_disk->queue) {
+		printk(KERN_ERR "Invalid block device\n");
+		kfree(vendor_cmd);
+		return;
+	}
+
+	// Check if device major number corresponds to NVMe (259)
+	if (MAJOR(bdev->bd_dev) != 259) {
+		printk(KERN_ERR "Not an NVMe device (major=%d)\n", MAJOR(bdev->bd_dev));
+		kfree(vendor_cmd);
+		return;
+	}
+	ret = __blkdev_driver_ioctl(bdev, 0, NVME_IOCTL_ADMIN_CMD, (unsigned long)vendor_cmd);
+	
+    kfree(vendor_cmd);
+}
+
+void traverse_node(struct file *file, struct ext4_extent_header *node, int current_depth) {
+    struct inode *inode = file->f_inode;
+	struct ext4_extent_idx *index;
+    struct ext4_extent *extent;
+    struct buffer_head *bh;
+	ext4_fsblk_t child_block;
+	struct ext4_extent_header *child_header;
+	ext4_fsblk_t start_block;
+	struct block_device *bdev = inode->i_sb->s_bdev;
+	sector_t dbr_sector = bdev->bd_part->start_sect;
+	struct ext4_sb_info *sbi = EXT4_SB(file->f_inode->i_sb);
+	struct ext4_super_block *es = sbi->s_es;
+	uint32_t blocksize = EXT4_MIN_BLOCK_SIZE << __le32_to_cpu(es->s_log_block_size);
+	uint32_t sectorsize = bdev->bd_disk->queue->limits.logical_block_size;
+	int len, i;
+	uint64_t data_len = 0;
+	uint64_t addr = 0;
+	if (current_depth > 0) {
+		for (i = 0; i < le16_to_cpu(node->eh_entries); i++) {
+			index = EXT_FIRST_INDEX(node) + i;
+
+			child_block =
+				le32_to_cpu(index->ei_leaf_lo) |
+				((ext4_fsblk_t)le16_to_cpu(index->ei_leaf_hi) << 32);
+
+			bh = sb_bread(inode->i_sb, child_block);
+			if (!bh) {
+				printk(KERN_ERR "Failed to read block %llu\n", child_block);
+				continue;
+			}
+
+			child_header = 
+				(struct ext4_extent_header *)bh->b_data;
+
+			traverse_node(file, child_header, current_depth - 1);
+			brelse(bh);
+		}
+	} 
+	else {
+		for (i = 0; i < le16_to_cpu(node->eh_entries); i++) {
+			extent = EXT_FIRST_EXTENT(node) + i;
+
+			start_block =
+				le32_to_cpu(extent->ee_start_lo) |
+				((ext4_fsblk_t)le16_to_cpu(extent->ee_start_hi) << 32);
+
+			len = ext4_ext_get_actual_len(extent);
+
+			if(data_size > 4096) {
+				data_size -= (4096 * len);
+				data_len = 4096 * len;
+			}
+			else{
+				data_len = data_size;
+			}
+			start_block = start_block * (blocksize / sectorsize);
+			addr = dbr_sector + start_block;
+			
+			ext4_send_vendor_command_to_nvme(file, &addr, &data_len);
+		}
+	}
+}
+
+void traverse_extent_tree(struct file *file) {
+	struct inode *inode = file->f_inode;
+    struct ext4_extent_header *header;
+    int depth;
+	data_size = (uint64_t)inode->i_size;
+
+    header = ext_inode_hdr(inode);
+    depth = le16_to_cpu(header->eh_depth);
+
+    traverse_node(file, header, depth);
+}
+
+void ext4_get_info_and_send_to_nvme(struct kiocb *iocb, struct iov_iter *from)
+{
+	struct file *file = iocb->ki_filp;
+    struct inode *inode = file->f_inode;
+	struct ext4_iloc iloc;
+	struct ext4_inode *file_inode;
+	int ret;
+
+	ret = ext4_get_inode_loc(inode, &iloc);
+	if (ret) {
+		printk(KERN_ERR "Failed to get inode location\n");
+		return;
+	}
+	file_inode = ext4_raw_inode(&iloc);
+	traverse_extent_tree(file);
+}
+
+ssize_t ext4_write_iter(struct kiocb *iocb, struct iov_iter *from)
+{
+    ssize_t ret = 0;
+	struct block_device *bdev = iocb->ki_filp->f_inode->i_sb->s_bdev;
+
+    ret = ext4_file_write_iter(iocb, from);
+	if (MAJOR(bdev->bd_dev) == 259) {
+		ext4_get_info_and_send_to_nvme(iocb, from);
+	}
+    return ret;
+}
+
+
 const struct file_operations ext4_file_operations = {
 	.llseek		= ext4_llseek,
 	.read_iter	= ext4_file_read_iter,
-	.write_iter	= ext4_file_write_iter,
+	.write_iter	= ext4_write_iter,
 	.unlocked_ioctl = ext4_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ext4_compat_ioctl,

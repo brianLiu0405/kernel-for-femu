@@ -517,6 +517,8 @@ int blkdev_ioctl(struct block_device *bdev, fmode_t mode, unsigned cmd,
 	loff_t size;
 	unsigned int max_sectors;
 
+	// printk(KERN_INFO "Entering: blkdev_ioctl\n");
+	// printk(KERN_INFO "bdev: %p, mode: %d, cmd: %u, arg: %lu\n", bdev, mode, cmd, arg);
 	switch (cmd) {
 	case BLKFLSBUF:
 		return blkdev_flushbuf(bdev, mode, cmd, arg);
