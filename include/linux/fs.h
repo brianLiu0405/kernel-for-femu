@@ -738,6 +738,7 @@ struct inode {
 #endif
 
 	void			*i_private; /* fs or device private pointer */
+	int			i_is_file;
 } __randomize_layout;
 
 struct timespec64 timestamp_truncate(struct timespec64 t, struct inode *inode);

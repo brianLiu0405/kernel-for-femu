@@ -623,6 +623,9 @@ page_is_mapped:
 	/*
 	 * This page will go to BIO.  Do we need to send this BIO off first?
 	 */
+	if(bio && inode->i_is_file == 0xc2){
+		bio->bi_is_file = 0xc2;
+	}
 	if (bio && mpd->last_block_in_bio != blocks[0] - 1)
 		bio = mpage_bio_submit(REQ_OP_WRITE, op_flags, bio);
 
@@ -649,6 +652,9 @@ alloc_new:
 	 */
 	wbc_account_cgroup_owner(wbc, page, PAGE_SIZE);
 	length = first_unmapped << blkbits;
+	if(bio && inode->i_is_file == 0xc2){
+		bio->bi_is_file = 0xc2;
+	}
 	if (bio_add_page(bio, page, length, 0) < length) {
 		bio = mpage_bio_submit(REQ_OP_WRITE, op_flags, bio);
 		goto alloc_new;
@@ -659,6 +665,9 @@ alloc_new:
 	BUG_ON(PageWriteback(page));
 	set_page_writeback(page);
 	unlock_page(page);
+	if(bio && inode->i_is_file == 0xc2){
+		bio->bi_is_file = 0xc2;
+	}
 	if (boundary || (first_unmapped != blocks_per_page)) {
 		bio = mpage_bio_submit(REQ_OP_WRITE, op_flags, bio);
 		if (boundary_block) {
@@ -671,6 +680,9 @@ alloc_new:
 	goto out;
 
 confused:
+	if(bio && inode->i_is_file == 0xc2){
+		bio->bi_is_file = 0xc2;
+	}
 	if (bio)
 		bio = mpage_bio_submit(REQ_OP_WRITE, op_flags, bio);
 
@@ -731,6 +743,9 @@ mpage_writepages(struct address_space *mapping,
 		if (mpd.bio) {
 			int op_flags = (wbc->sync_mode == WB_SYNC_ALL ?
 				  REQ_SYNC : 0);
+			if(mapping->host->i_is_file == 0xc2){
+				mpd.bio->bi_is_file = 0xc2;
+			}
 			mpage_bio_submit(REQ_OP_WRITE, op_flags, mpd.bio);
 		}
 	}
@@ -752,6 +767,9 @@ int mpage_writepage(struct page *page, get_block_t get_block,
 	if (mpd.bio) {
 		int op_flags = (wbc->sync_mode == WB_SYNC_ALL ?
 			  REQ_SYNC : 0);
+		if(page->mapping->host->i_is_file == 0xc2){
+			mpd.bio->bi_is_file = 0xc2;
+		}
 		mpage_bio_submit(REQ_OP_WRITE, op_flags, mpd.bio);
 	}
 	return ret;

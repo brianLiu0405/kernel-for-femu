@@ -1452,18 +1452,12 @@ static int nvme_user_cmd(struct nvme_ctrl *ctrl, struct nvme_ns *ns,
 	unsigned timeout = 0;
 	u32 effects;
 	u64 result;
-	int status;	
-	if (!capable(CAP_SYS_ADMIN)){
-		if(!(ucmd->opcode == 0xC2))
-			return -EACCES;
-	}
-	if (copy_from_user(&cmd, ucmd, sizeof(cmd))){
-		if(!(ucmd->opcode == 0xC2))
-			return -EFAULT;
-		else{
-			memcpy(&cmd, ucmd, sizeof(struct nvme_admin_cmd));
-		}
-	}
+	int status;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EACCES;
+	if (copy_from_user(&cmd, ucmd, sizeof(cmd)))
+		return -EFAULT;
 	if (cmd.flags)
 		return -EINVAL;
 
@@ -1491,10 +1485,8 @@ static int nvme_user_cmd(struct nvme_ctrl *ctrl, struct nvme_ns *ns,
 	nvme_passthru_end(ctrl, effects);
 
 	if (status >= 0) {
-		if (put_user(result, &ucmd->result)){
-			if(!(ucmd->opcode == 0xC2))
-				return -EFAULT;
-		}
+		if (put_user(result, &ucmd->result))
+			return -EFAULT;
 	}
 
 	return status;
@@ -1617,7 +1609,8 @@ static int nvme_ioctl(struct block_device *bdev, fmode_t mode,
 	struct nvme_ns_head *head = NULL;
 	void __user *argp = (void __user *)arg;
 	struct nvme_ns *ns;
-	int srcu_idx, ret;	
+	int srcu_idx, ret;
+
 	ns = nvme_get_ns_from_disk(bdev->bd_disk, &head, &srcu_idx);
 	if (unlikely(!ns))
 		return -EWOULDBLOCK;
@@ -3031,7 +3024,7 @@ static long nvme_dev_ioctl(struct file *file, unsigned int cmd,
 		return nvme_user_cmd(ctrl, NULL, argp);
 	case NVME_IOCTL_ADMIN64_CMD:
 		return nvme_user_cmd64(ctrl, NULL, argp);
-	case NVME_IOCTL_IO_CMD:		
+	case NVME_IOCTL_IO_CMD:
 		return nvme_dev_user_cmd(ctrl, argp);
 	case NVME_IOCTL_RESET:
 		if (!capable(CAP_SYS_ADMIN))

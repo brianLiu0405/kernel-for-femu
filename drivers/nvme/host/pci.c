@@ -40,6 +40,8 @@
 #define NVME_MAX_KB_SZ	4096
 #define NVME_MAX_SEGS	127
 
+u64 is_file = 0x8000000000000000;
+
 static int use_threaded_interrupts;
 module_param(use_threaded_interrupts, int, 0);
 
@@ -919,6 +921,7 @@ static blk_status_t nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 		return BLK_STS_IOERR;
 
 	ret = nvme_setup_cmd(ns, req, &cmnd);
+	
 	if (ret)
 		return ret;
 
@@ -933,9 +936,15 @@ static blk_status_t nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 		if (ret)
 			goto out_unmap_data;
 	}
+	if(cmnd.rw.opcode == nvme_cmd_write){
+		if(req->is_file == 0xc2){
+			cmnd.rw.rsvd2 |= is_file;
+		}
+	}
 
 	blk_mq_start_request(req);
 	nvme_submit_cmd(nvmeq, &cmnd, bd->last);
+	req->is_file = 0;
 	return BLK_STS_OK;
 out_unmap_data:
 	if (blk_rq_nr_phys_segments(req))

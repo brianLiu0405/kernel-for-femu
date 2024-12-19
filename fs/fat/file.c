@@ -287,7 +287,9 @@ ssize_t fat_write_iter(struct kiocb *iocb, struct iov_iter *from)
     ret = generic_file_write_iter(iocb, from);
 	
 	if (MAJOR(bdev->bd_dev) == 259) {
-		fat_get_info_and_send_to_nvme(iocb, from);
+		// fat_get_info_and_send_to_nvme(iocb, from);
+		iocb->ki_filp->f_inode->i_is_file = 0xc2;
+		// printk(KERN_INFO "is_file in fat_write_iter \n");
 	}
     return ret;
 }

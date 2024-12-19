@@ -1991,7 +1991,14 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
 	struct request *same_queue_rq = NULL;
 	unsigned int nr_segs;
 	blk_qc_t cookie;
+	int is_file = 0;
 
+	if(bio->bi_is_file == 0xc2){
+		is_file = 0xc2;
+		bio->bi_is_file = 0;
+		// printk("blk_mq_make_request\n");
+	}
+	
 	blk_queue_bounce(q, &bio);
 	__blk_queue_split(q, &bio, &nr_segs);
 
@@ -2023,6 +2030,10 @@ static blk_qc_t blk_mq_make_request(struct request_queue *q, struct bio *bio)
 	cookie = request_to_qc_t(data.hctx, rq);
 
 	blk_mq_bio_to_request(rq, bio, nr_segs);
+
+	if(is_file){
+		rq->is_file = 0xc2;
+	}
 
 	plug = blk_mq_plug(q, bio);
 	if (unlikely(is_flush_fua)) {

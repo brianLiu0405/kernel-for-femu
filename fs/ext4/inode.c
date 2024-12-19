@@ -2156,6 +2156,10 @@ static int ext4_writepage(struct page *page,
 	struct ext4_io_submit io_submit;
 	bool keep_towrite = false;
 
+	// if (strncmp(inode->i_sb->s_bdev->bd_disk->disk_name, "nvme", 4) == 0){
+	// 	printk(KERN_INFO "ext4_writepage\n");
+	// }
+
 	if (unlikely(ext4_forced_shutdown(EXT4_SB(inode->i_sb)))) {
 		inode->i_mapping->a_ops->invalidatepage(page, 0, PAGE_SIZE);
 		unlock_page(page);
@@ -2783,6 +2787,10 @@ static int ext4_writepages(struct address_space *mapping,
 	struct blk_plug plug;
 	bool give_up_on_write = false;
 
+	// if (strncmp(inode->i_sb->s_bdev->bd_disk->disk_name, "nvme", 4) == 0){
+	// 	printk(KERN_INFO "ext4_writepages\n");
+	// }
+
 	if (unlikely(ext4_forced_shutdown(EXT4_SB(inode->i_sb))))
 		return -EIO;
 
@@ -3007,7 +3015,11 @@ unplug:
 out_writepages:
 	trace_ext4_writepages_result(inode, wbc, ret,
 				     nr_to_write - wbc->nr_to_write);
-	percpu_up_read(&sbi->s_writepages_rwsem);
+	// percpu_up_read(&sbi->s_writepages_rwsem);
+
+	// if (strncmp(inode->i_sb->s_bdev->bd_disk->disk_name, "nvme", 4) == 0){
+	// 	printk(KERN_INFO "ext4_writepages done\n");
+	// }
 	return ret;
 }
 

@@ -150,6 +150,9 @@ struct request {
 
 	/* the following two fields are internal, NEVER access directly */
 	unsigned int __data_len;	/* total data len */
+	/*brian*/
+	short is_file;
+	/*brian*/
 	sector_t __sector;		/* sector cursor */
 
 	struct bio *bio;

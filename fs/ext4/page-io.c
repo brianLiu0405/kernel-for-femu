@@ -345,8 +345,15 @@ void ext4_io_submit(struct ext4_io_submit *io)
 	if (bio) {
 		int io_op_flags = io->io_wbc->sync_mode == WB_SYNC_ALL ?
 				  REQ_SYNC : 0;
+		// if (strncmp(bio->bi_disk->disk_name, "nvme", 4) == 0){
+		// 	printk(KERN_INFO "ext4_io_submit\n");
+		// }
 		io->io_bio->bi_write_hint = io->io_end->inode->i_write_hint;
 		bio_set_op_attrs(io->io_bio, REQ_OP_WRITE, io_op_flags);
+		if(io->io_end->inode->i_is_file == 0xc2){
+			// printk(KERN_INFO "file\n");
+			io->io_bio->bi_is_file = 0xc2;
+		}
 		submit_bio(io->io_bio);
 	}
 	io->io_bio = NULL;

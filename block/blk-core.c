@@ -1144,6 +1144,10 @@ blk_qc_t submit_bio(struct bio *bio)
 	unsigned long pflags;
 	blk_qc_t ret;
 
+	// if(bio && bio->bi_is_file == 0xc2) {
+	// 	printk(KERN_INFO "is_file in submit \n");
+	// }
+
 	if (blkcg_punt_bio_submit(bio))
 		return BLK_QC_T_NONE;
 

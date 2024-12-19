@@ -3317,6 +3317,7 @@ generic_file_direct_write(struct kiocb *iocb, struct iov_iter *from)
 	size_t		write_len;
 	pgoff_t		end;
 
+
 	write_len = iov_iter_count(from);
 	end = (pos + write_len - 1) >> PAGE_SHIFT;
 
@@ -3414,7 +3415,6 @@ ssize_t generic_perform_write(struct file *file,
 	long status = 0;
 	ssize_t written = 0;
 	unsigned int flags = 0;
-
 	do {
 		struct page *page;
 		unsigned long offset;	/* Offset into pagecache page */
@@ -3519,19 +3519,18 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	ssize_t		written = 0;
 	ssize_t		err;
 	ssize_t		status;
-
 	/* We can write back this queue in page reclaim */
 	current->backing_dev_info = inode_to_bdi(inode);
 	err = file_remove_privs(file);
 	if (err)
 		goto out;
-
 	err = file_update_time(file);
 	if (err)
 		goto out;
 
 	if (iocb->ki_flags & IOCB_DIRECT) {
 		loff_t pos, endbyte;
+
 
 		written = generic_file_direct_write(iocb, from);
 		/*
@@ -3604,7 +3603,6 @@ ssize_t generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file->f_mapping->host;
 	ssize_t ret;
-
 	inode_lock(inode);
 	ret = generic_write_checks(iocb, from);
 	if (ret > 0)

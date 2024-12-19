@@ -131,6 +131,9 @@ struct dio {
 	int is_async;			/* is IO async ? */
 	bool defer_completion;		/* defer AIO completion to workqueue? */
 	bool should_dirty;		/* if pages should be dirtied */
+	/*brian*/
+	short dio_is_file;
+	/*brian*/
 	int io_error;			/* IO error in completion path */
 	unsigned long refcount;		/* direct_io_worker() and bios */
 	struct bio *bio_list;		/* singly linked via bi_private */
@@ -469,6 +472,15 @@ static inline void dio_bio_submit(struct dio *dio, struct dio_submit *sdio)
 	dio->refcount++;
 	spin_unlock_irqrestore(&dio->bio_lock, flags);
 
+	// printk("dio->dio_is_file: %d\n", dio->dio_is_file);
+	if(dio->dio_is_file == 0xc2) {
+		bio->bi_is_file = 0xc2;
+	}
+	else {
+		bio->bi_is_file = 0;
+	}
+	// printk("bio->bi_is_file: %d\n", bio->bi_is_file);
+
 	if (dio->is_async && dio->op == REQ_OP_READ && dio->should_dirty)
 		bio_set_pages_dirty(bio);
 
@@ -477,8 +489,9 @@ static inline void dio_bio_submit(struct dio *dio, struct dio_submit *sdio)
 	if (sdio->submit_io) {
 		sdio->submit_io(bio, dio->inode, sdio->logical_offset_in_bio);
 		dio->bio_cookie = BLK_QC_T_NONE;
-	} else
+	} else{
 		dio->bio_cookie = submit_bio(bio);
+	}
 
 	sdio->bio = NULL;
 	sdio->boundary = 0;
@@ -1208,6 +1221,13 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 	 */
 	memset(dio, 0, offsetof(struct dio, pages));
 
+	/*brian*/
+	if(dio && inode->i_is_file == 0xc2){
+		dio->dio_is_file = 0xc2;
+		inode->i_is_file = 0;
+	}
+	/*brian*/
+
 	dio->flags = flags;
 	if (dio->flags & DIO_LOCKING) {
 		if (iov_iter_rw(iter) == READ) {
@@ -1389,6 +1409,9 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 		BUG_ON(retval != -EIOCBQUEUED);
 
 out:
+	if(dio->dio_is_file == 0xc2){
+		dio->dio_is_file = 0;
+	}
 	return retval;
 }
 
